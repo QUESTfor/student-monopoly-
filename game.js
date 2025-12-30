@@ -799,10 +799,7 @@ function startTimer() {
         document.getElementById('timerDisplay').textContent = 
             `Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         
-        // Auto end game after 45 minutes
-        if (minutes >= 45) {
-            endGame();
-        }
+        
     }, 1000);
 }
 
@@ -909,3 +906,4 @@ async function resetGame() {
 // Initialize on load
 
 window.onload = initGame;
+
