@@ -377,79 +377,132 @@ function syncGameState(remoteState) {
 function drawBoard() {
     const canvas = document.getElementById('boardCanvas');
     const ctx = canvas.getContext('2d');
-    const centerX = 350;
-    const centerY = 350;
-    const radius = 280;
     
     ctx.clearRect(0, 0, 700, 700);
     
-    // Draw center
+    // Board dimensions
+    const boardSize = 640;
+    const startX = 30;
+    const startY = 30;
+    const spaceSize = 80;
+    const spacesPerSide = 9;
+    
+    // Draw board background
     ctx.fillStyle = '#f0f0f0';
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 100, 0, 2 * Math.PI);
-    ctx.fill();
+    ctx.fillRect(startX, startY, boardSize, boardSize);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(startX, startY, boardSize, boardSize);
+    
+    // Draw center info
+    const centerX = startX + boardSize / 2;
+    const centerY = startY + boardSize / 2;
     
     ctx.fillStyle = '#667eea';
-    ctx.font = 'bold 28px Arial';
+    ctx.font = 'bold 32px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Year ${gameState.currentRound}`, centerX, centerY - 20);
     
-    ctx.font = '20px Arial';
-    ctx.fillText('大學四年', centerX, centerY + 15);
+    ctx.font = '24px Arial';
+    ctx.fillText('大學四年', centerX, centerY + 20);
     
-    // Draw spaces
+    // Draw spaces around the board
     GAME_DATA.spaces.forEach((space, index) => {
-        const angle = (index / GAME_DATA.spaces.length) * 2 * Math.PI - Math.PI / 2;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
+        let x, y, width, height;
         
-        // Draw space circle
-        ctx.beginPath();
-        ctx.arc(x, y, 22, 0, 2 * Math.PI);
+        // Bottom row (0-9): left to right
+        if (index <= 9) {
+            x = startX + index * (boardSize / spacesPerSide);
+            y = startY + boardSize - spaceSize;
+            width = boardSize / spacesPerSide;
+            height = spaceSize;
+        }
+        // Right column (10-18): bottom to top
+        else if (index <= 18) {
+            x = startX + boardSize - spaceSize;
+            y = startY + boardSize - (index - 9) * (boardSize / spacesPerSide) - spaceSize;
+            width = spaceSize;
+            height = boardSize / spacesPerSide;
+        }
+        // Top row (19-27): right to left
+        else if (index <= 27) {
+            x = startX + boardSize - (index - 18) * (boardSize / spacesPerSide) - (boardSize / spacesPerSide);
+            y = startY;
+            width = boardSize / spacesPerSide;
+            height = spaceSize;
+        }
+        // Left column (28-35): top to bottom
+        else {
+            x = startX;
+            y = startY + (index - 27) * (boardSize / spacesPerSide);
+            width = spaceSize;
+            height = boardSize / spacesPerSide;
+        }
+        
+        // Draw space background
         ctx.fillStyle = SPACE_COLORS[space.type] || '#CCC';
-        ctx.fill();
+        ctx.fillRect(x, y, width, height);
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 2;
-        ctx.stroke();
+        ctx.strokeRect(x, y, width, height);
         
         // Draw space number
-        ctx.fillStyle = '#FFF';
-        ctx.font = 'bold 14px Arial';
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(index, x, y);
+        ctx.fillText(index, x + width / 2, y + height / 2 - 15);
         
-        // Draw space name (small)
-        ctx.fillStyle = '#333';
-        ctx.font = '9px Arial';
-        const nameAngle = angle + Math.PI / 2;
-        const textX = x + 30 * Math.cos(nameAngle);
-        const textY = y + 30 * Math.sin(nameAngle);
-        
-        ctx.save();
-        ctx.translate(textX, textY);
-        ctx.rotate(angle + Math.PI / 2);
-        ctx.fillText(space.name.substring(0, 4), 0, 0);
-        ctx.restore();
+        // Draw space name (wrapped text)
+        ctx.font = '11px Arial';
+        ctx.fillStyle = '#000';
+        const nameLines = space.name.split(' ');
+        nameLines.forEach((line, i) => {
+            ctx.fillText(line, x + width / 2, y + height / 2 + 5 + (i * 12));
+        });
     });
     
     // Draw players
     gameState.players.forEach((player, pIndex) => {
-        const angle = (player.position / GAME_DATA.spaces.length) * 2 * Math.PI - Math.PI / 2;
+        const spaceIndex = player.position;
+        let spaceX, spaceY, spaceWidth, spaceHeight;
+        
+        // Calculate space position (same logic as above)
+        if (spaceIndex <= 9) {
+            spaceX = startX + spaceIndex * (boardSize / spacesPerSide);
+            spaceY = startY + boardSize - spaceSize;
+            spaceWidth = boardSize / spacesPerSide;
+            spaceHeight = spaceSize;
+        } else if (spaceIndex <= 18) {
+            spaceX = startX + boardSize - spaceSize;
+            spaceY = startY + boardSize - (spaceIndex - 9) * (boardSize / spacesPerSide) - spaceSize;
+            spaceWidth = spaceSize;
+            spaceHeight = boardSize / spacesPerSide;
+        } else if (spaceIndex <= 27) {
+            spaceX = startX + boardSize - (spaceIndex - 18) * (boardSize / spacesPerSide) - (boardSize / spacesPerSide);
+            spaceY = startY;
+            spaceWidth = boardSize / spacesPerSide;
+            spaceHeight = spaceSize;
+        } else {
+            spaceX = startX;
+            spaceY = startY + (spaceIndex - 27) * (boardSize / spacesPerSide);
+            spaceWidth = spaceSize;
+            spaceHeight = boardSize / spacesPerSide;
+        }
         
         // Offset players if on same space
         const playersOnSpace = gameState.players.filter(p => p.position === player.position);
         const indexOnSpace = playersOnSpace.indexOf(player);
-        const offsetAngle = (indexOnSpace - playersOnSpace.length / 2) * 0.3;
+        const offsetX = (indexOnSpace % 2) * 25 - 12;
+        const offsetY = Math.floor(indexOnSpace / 2) * 25 - 12;
         
-        const playerRadius = radius - 60;
-        const x = centerX + playerRadius * Math.cos(angle + offsetAngle);
-        const y = centerY + playerRadius * Math.sin(angle + offsetAngle);
+        const playerX = spaceX + spaceWidth / 2 + offsetX;
+        const playerY = spaceY + spaceHeight / 2 + offsetY;
         
         // Draw player token
         ctx.beginPath();
-        ctx.arc(x, y, 16, 0, 2 * Math.PI);
+        ctx.arc(playerX, playerY, 18, 0, 2 * Math.PI);
         ctx.fillStyle = player.color;
         ctx.fill();
         
@@ -461,10 +514,10 @@ function drawBoard() {
         
         // Draw player initial
         ctx.fillStyle = '#FFF';
-        ctx.font = 'bold 12px Arial';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(player.name.charAt(0), x, y);
+        ctx.fillText(player.name.charAt(0), playerX, playerY);
     });
 }
 
@@ -854,4 +907,5 @@ async function resetGame() {
 }
 
 // Initialize on load
+
 window.onload = initGame;
