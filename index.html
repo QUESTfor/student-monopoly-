@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大學四年 - College Life Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="gameContainer">
+        <header>
+            <h1>🎓 大學四年 College Life Game</h1>
+            <div id="gameInfo">
+                <span id="yearDisplay">Year: 1/4</span>
+                <span id="turnDisplay">Turn: 1</span>
+                <span id="timerDisplay">Time: 00:00</span>
+            </div>
+        </header>
+
+        <!-- Setup Screen -->
+        <div id="setupScreen">
+            <h2>Multiplayer Lobby</h2>
+            <div class="setup-form">
+                <div style="margin-bottom: 30px;">
+                    <button id="createGameBtn" class="btn-primary" style="width: 100%; margin: 10px 0;">
+                        🎮 Create New Game
+                    </button>
+                    <button id="joinGameBtn" class="btn-secondary" style="width: 100%; margin: 10px 0;">
+                        🔗 Join Existing Game
+                    </button>
+                </div>
+                
+                <div id="createGameForm" class="hidden">
+                    <h3>Create Game Room</h3>
+                    <input type="text" id="hostName" placeholder="Your Name" value="Host">
+                    <select id="maxPlayers">
+                        <option value="2">2 Players</option>
+                        <option value="3">3 Players</option>
+                        <option value="4" selected>4 Players</option>
+                    </select>
+                    <button id="startCreateBtn" class="btn-primary">Create Room</button>
+                    <button id="backFromCreate" class="btn-secondary">Back</button>
+                </div>
+                
+                <div id="joinGameForm" class="hidden">
+                    <h3>Join Game Room</h3>
+                    <input type="text" id="playerName" placeholder="Your Name" value="Player">
+                    <input type="text" id="gameCode" placeholder="Enter 6-digit Game Code" maxlength="6" style="text-transform: uppercase;">
+                    <button id="startJoinBtn" class="btn-primary">Join Room</button>
+                    <button id="backFromJoin" class="btn-secondary">Back</button>
+                </div>
+                
+                <div id="waitingRoom" class="hidden">
+                    <h3>Game Room: <span id="roomCode" style="color: #667eea; font-size: 1.5em;"></span></h3>
+                    <p style="color: #666;">Share this code with friends!</p>
+                    <div id="playerList" style="margin: 20px 0;"></div>
+                    <button id="startGameFromLobby" class="btn-primary hidden">🚀 Start Game</button>
+                    <button id="leaveRoom" class="btn-secondary">Leave Room</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Game Screen -->
+        <div id="gameScreen" class="hidden">
+            <div id="gameBoard">
+                <canvas id="boardCanvas" width="700" height="700"></canvas>
+            </div>
+
+            <div id="playerStats"></div>
+
+            <div id="controls">
+                <button id="rollBtn" class="btn-primary">🎲 Roll Dice</button>
+                <button id="saveBtn" class="btn-secondary">💾 Save Game</button>
+                <button id="loadBtn" class="btn-secondary">📂 Load Game</button>
+            </div>
+
+            <div id="gameLog">
+                <h3>Game Log</h3>
+                <div id="logContent"></div>
+            </div>
+        </div>
+
+        <!-- Event Modal -->
+        <div id="eventModal" class="modal hidden">
+            <div class="modal-content">
+                <h2 id="eventTitle"></h2>
+                <p id="eventDescription"></p>
+                <div id="eventOptions">
+                    <button id="optionA" class="btn-choice"></button>
+                    <button id="optionB" class="btn-choice"></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Question Modal -->
+        <div id="questionModal" class="modal hidden">
+            <div class="modal-content">
+                <h2>📚 Academic Challenge</h2>
+                <p id="questionText"></p>
+                <div id="questionOptions">
+                    <button class="btn-option" data-answer="A"></button>
+                    <button class="btn-option" data-answer="B"></button>
+                    <button class="btn-option" data-answer="C"></button>
+                    <button class="btn-option" data-answer="D"></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Modal -->
+        <div id="resultModal" class="modal hidden">
+            <div class="modal-content">
+                <h2 id="resultTitle"></h2>
+                <p id="resultMessage"></p>
+                <button id="resultOkBtn" class="btn-primary">OK</button>
+            </div>
+        </div>
+
+        <!-- Game Over Modal -->
+        <div id="gameOverModal" class="modal hidden">
+            <div class="modal-content game-over">
+                <h2>🎉 Game Over!</h2>
+                <div id="finalScores"></div>
+                <button id="newGameBtn" class="btn-primary">New Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Scripts - MUST BE IN THIS ORDER -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="data.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
