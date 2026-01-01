@@ -16,7 +16,8 @@ const gameState = {
     startTime: null,
     maxRounds: 4,
     timerInterval: null,
-    gameLog: []
+    gameLog: [],
+    skipNextTurn: {} // Track players who skip turns
 };
 
 // Player colors
@@ -187,14 +188,12 @@ function showWaitingRoom() {
 function listenToGameUpdates() {
     const gameRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}`);
     
-    // Listen to player list updates
     const playersListener = gameRef.child('players').on('value', (snapshot) => {
         const players = snapshot.val() || {};
         updatePlayerList(players);
     });
     multiplayerState.listeners.push({ ref: gameRef.child('players'), type: 'value' });
     
-    // Listen to game state updates
     const gameStateListener = gameRef.child('gameState').on('value', (snapshot) => {
         if (snapshot.exists()) {
             const remoteGameState = snapshot.val();
@@ -203,7 +202,6 @@ function listenToGameUpdates() {
     });
     multiplayerState.listeners.push({ ref: gameRef.child('gameState'), type: 'value' });
     
-    // Listen to game status
     const statusListener = gameRef.child('status').on('value', (snapshot) => {
         if (snapshot.val() === 'playing') {
             startGameFromLobby();
@@ -255,16 +253,11 @@ async function startMultiplayerGame() {
             return;
         }
         
-        // Initialize game state
         const players = Object.entries(gameData.players).map(([id, data], index) => ({
             id: id,
             name: data.name,
             position: 0,
-            credits: 5000,
-            energy: 3,
-            academicPoints: 0,
-            socialPoints: 0,
-            careerPoints: 0,
+            totalPoints: 0,
             color: data.color
         }));
         
@@ -274,6 +267,7 @@ async function startMultiplayerGame() {
             currentRound: 1,
             turnCount: 0,
             startTime: Date.now(),
+            skipNextTurn: {},
             gameLog: [{
                 message: '🎮 Game Started! Good luck!',
                 type: 'roll',
@@ -305,18 +299,14 @@ async function leaveRoom() {
     const gameRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}`);
     
     try {
-        // Remove player from room
         await gameRef.child(`players/${multiplayerState.playerId}`).remove();
         
-        // If host leaves, delete the room
         if (multiplayerState.isHost) {
             await gameRef.remove();
         }
         
-        // Clean up listeners
         cleanupListeners();
         
-        // Reset state
         multiplayerState.gameId = null;
         multiplayerState.playerId = null;
         multiplayerState.isHost = false;
@@ -337,31 +327,28 @@ function cleanupListeners() {
 function syncGameState(remoteState) {
     if (!remoteState) return;
     
-    // Update local game state
     gameState.players = remoteState.players || [];
     gameState.currentPlayerIndex = remoteState.currentPlayerIndex || 0;
     gameState.currentRound = remoteState.currentRound || 1;
     gameState.turnCount = remoteState.turnCount || 0;
     gameState.gameLog = remoteState.gameLog || [];
+    gameState.skipNextTurn = remoteState.skipNextTurn || {};
     
     if (!gameState.startTime) {
         gameState.startTime = remoteState.startTime || Date.now();
     }
     
-    // Update UI
     updatePlayerCards();
     drawBoard();
     
     document.getElementById('yearDisplay').textContent = `Year: ${gameState.currentRound}/4`;
     document.getElementById('turnDisplay').textContent = `Turn: ${gameState.turnCount}`;
     
-    // Update game log
     const logContent = document.getElementById('logContent');
     logContent.innerHTML = gameState.gameLog.slice(0, 20).map(log => 
         `<div class="log-entry ${log.type}">${log.message}</div>`
     ).join('');
     
-    // Enable/disable roll button based on current player
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isMyTurn = currentPlayer && currentPlayer.id === multiplayerState.playerId;
     const rollBtn = document.getElementById('rollBtn');
@@ -380,145 +367,153 @@ function drawBoard() {
     
     ctx.clearRect(0, 0, 700, 700);
     
-    // Board dimensions
-    const boardSize = 640;
-    const startX = 30;
-    const startY = 30;
-    const spaceSize = 80;
-    const spacesPerSide = 9;
+    const boardSize = 600;
+    const startX = 50;
+    const startY = 50;
+    const cornerSize = 80;
+    const sideSpaceWidth = (boardSize - 2 * cornerSize) / 8;
+    const sideSpaceHeight = 60;
     
     // Draw board background
-    ctx.fillStyle = '#f0f0f0';
+    ctx.fillStyle = '#e8f4f8';
     ctx.fillRect(startX, startY, boardSize, boardSize);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 3;
     ctx.strokeRect(startX, startY, boardSize, boardSize);
     
-    // Draw center info
+    // Draw center
     const centerX = startX + boardSize / 2;
     const centerY = startY + boardSize / 2;
     
     ctx.fillStyle = '#667eea';
-    ctx.font = 'bold 32px Arial';
+    ctx.font = 'bold 28px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`Year ${gameState.currentRound}`, centerX, centerY - 20);
+    ctx.fillText(`Year ${gameState.currentRound}`, centerX, centerY - 15);
     
-    ctx.font = '24px Arial';
-    ctx.fillText('大學四年', centerX, centerY + 20);
+    ctx.font = '20px Arial';
+    ctx.fillText('大學四年', centerX, centerY + 15);
     
-    // Draw spaces around the board
+    // Draw all 36 spaces
     GAME_DATA.spaces.forEach((space, index) => {
         let x, y, width, height;
         
-        // Bottom row (0-9): left to right
+        // Bottom row (spaces 0-9)
         if (index <= 9) {
-            x = startX + index * (boardSize / spacesPerSide);
-            y = startY + boardSize - spaceSize;
-            width = boardSize / spacesPerSide;
-            height = spaceSize;
+            x = startX + (index * sideSpaceWidth);
+            if (index === 0) { x = startX; width = cornerSize; } 
+            else if (index === 9) { width = cornerSize; }
+            else { width = sideSpaceWidth; }
+            y = startY + boardSize - sideSpaceHeight;
+            height = sideSpaceHeight;
         }
-        // Right column (10-18): bottom to top
+        // Right column (spaces 10-18)
         else if (index <= 18) {
-            x = startX + boardSize - spaceSize;
-            y = startY + boardSize - (index - 9) * (boardSize / spacesPerSide) - spaceSize;
-            width = spaceSize;
-            height = boardSize / spacesPerSide;
+            const offset = index - 10;
+            x = startX + boardSize - cornerSize;
+            y = startY + boardSize - sideSpaceHeight - ((offset + 1) * sideSpaceWidth);
+            width = cornerSize;
+            height = sideSpaceWidth;
         }
-        // Top row (19-27): right to left
+        // Top row (spaces 19-27)
         else if (index <= 27) {
-            x = startX + boardSize - (index - 18) * (boardSize / spacesPerSide) - (boardSize / spacesPerSide);
+            const offset = index - 19;
+            x = startX + boardSize - cornerSize - ((offset + 1) * sideSpaceWidth);
             y = startY;
-            width = boardSize / spacesPerSide;
-            height = spaceSize;
+            width = sideSpaceWidth;
+            height = sideSpaceHeight;
         }
-        // Left column (28-35): top to bottom
+        // Left column (spaces 28-35)
         else {
+            const offset = index - 28;
             x = startX;
-            y = startY + (index - 27) * (boardSize / spacesPerSide);
-            width = spaceSize;
-            height = boardSize / spacesPerSide;
+            y = startY + sideSpaceHeight + (offset * sideSpaceWidth);
+            width = cornerSize;
+            height = sideSpaceWidth;
         }
         
-        // Draw space background
+        // Draw space
         ctx.fillStyle = SPACE_COLORS[space.type] || '#CCC';
         ctx.fillRect(x, y, width, height);
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, width, height);
         
-        // Draw space number
+        // Draw number
         ctx.fillStyle = '#000';
-        ctx.font = 'bold 16px Arial';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(index, x + width / 2, y + height / 2 - 15);
+        ctx.textBaseline = 'top';
+        ctx.fillText(index, x + width / 2, y + 5);
         
-        // Draw space name (wrapped text)
-        ctx.font = '11px Arial';
-        ctx.fillStyle = '#000';
-        const nameLines = space.name.split(' ');
-        nameLines.forEach((line, i) => {
-            ctx.fillText(line, x + width / 2, y + height / 2 + 5 + (i * 12));
+        // Draw name
+        ctx.font = '10px Arial';
+        const words = space.name.split(' ');
+        words.forEach((word, i) => {
+            ctx.fillText(word, x + width / 2, y + 22 + (i * 11));
         });
     });
     
     // Draw players
     gameState.players.forEach((player, pIndex) => {
-        const spaceIndex = player.position;
-        let spaceX, spaceY, spaceWidth, spaceHeight;
-        
-        // Calculate space position (same logic as above)
-        if (spaceIndex <= 9) {
-            spaceX = startX + spaceIndex * (boardSize / spacesPerSide);
-            spaceY = startY + boardSize - spaceSize;
-            spaceWidth = boardSize / spacesPerSide;
-            spaceHeight = spaceSize;
-        } else if (spaceIndex <= 18) {
-            spaceX = startX + boardSize - spaceSize;
-            spaceY = startY + boardSize - (spaceIndex - 9) * (boardSize / spacesPerSide) - spaceSize;
-            spaceWidth = spaceSize;
-            spaceHeight = boardSize / spacesPerSide;
-        } else if (spaceIndex <= 27) {
-            spaceX = startX + boardSize - (spaceIndex - 18) * (boardSize / spacesPerSide) - (boardSize / spacesPerSide);
-            spaceY = startY;
-            spaceWidth = boardSize / spacesPerSide;
-            spaceHeight = spaceSize;
-        } else {
-            spaceX = startX;
-            spaceY = startY + (spaceIndex - 27) * (boardSize / spacesPerSide);
-            spaceWidth = spaceSize;
-            spaceHeight = boardSize / spacesPerSide;
-        }
-        
-        // Offset players if on same space
-        const playersOnSpace = gameState.players.filter(p => p.position === player.position);
-        const indexOnSpace = playersOnSpace.indexOf(player);
-        const offsetX = (indexOnSpace % 2) * 25 - 12;
-        const offsetY = Math.floor(indexOnSpace / 2) * 25 - 12;
-        
-        const playerX = spaceX + spaceWidth / 2 + offsetX;
-        const playerY = spaceY + spaceHeight / 2 + offsetY;
-        
-        // Draw player token
-        ctx.beginPath();
-        ctx.arc(playerX, playerY, 18, 0, 2 * Math.PI);
-        ctx.fillStyle = player.color;
-        ctx.fill();
-        
-        // Highlight current player
-        const isCurrent = pIndex === gameState.currentPlayerIndex;
-        ctx.strokeStyle = isCurrent ? '#FFD700' : '#000';
-        ctx.lineWidth = isCurrent ? 4 : 2;
-        ctx.stroke();
-        
-        // Draw player initial
-        ctx.fillStyle = '#FFF';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(player.name.charAt(0), playerX, playerY);
+        drawPlayerToken(ctx, player, pIndex, startX, startY, boardSize, cornerSize, sideSpaceWidth, sideSpaceHeight);
     });
+}
+
+function drawPlayerToken(ctx, player, pIndex, startX, startY, boardSize, cornerSize, sideSpaceWidth, sideSpaceHeight) {
+    const index = player.position;
+    let spaceX, spaceY, spaceWidth, spaceHeight;
+    
+    if (index <= 9) {
+        spaceX = startX + (index * sideSpaceWidth);
+        if (index === 0) { spaceX = startX; spaceWidth = cornerSize; }
+        else if (index === 9) { spaceWidth = cornerSize; }
+        else { spaceWidth = sideSpaceWidth; }
+        spaceY = startY + boardSize - sideSpaceHeight;
+        spaceHeight = sideSpaceHeight;
+    } else if (index <= 18) {
+        const offset = index - 10;
+        spaceX = startX + boardSize - cornerSize;
+        spaceY = startY + boardSize - sideSpaceHeight - ((offset + 1) * sideSpaceWidth);
+        spaceWidth = cornerSize;
+        spaceHeight = sideSpaceWidth;
+    } else if (index <= 27) {
+        const offset = index - 19;
+        spaceX = startX + boardSize - cornerSize - ((offset + 1) * sideSpaceWidth);
+        spaceY = startY;
+        spaceWidth = sideSpaceWidth;
+        spaceHeight = sideSpaceHeight;
+    } else {
+        const offset = index - 28;
+        spaceX = startX;
+        spaceY = startY + sideSpaceHeight + (offset * sideSpaceWidth);
+        spaceWidth = cornerSize;
+        spaceHeight = sideSpaceWidth;
+    }
+    
+    const playersOnSpace = gameState.players.filter(p => p.position === player.position);
+    const indexOnSpace = playersOnSpace.indexOf(player);
+    const offsetX = (indexOnSpace % 2) * 20 - 10;
+    const offsetY = Math.floor(indexOnSpace / 2) * 20 - 10;
+    
+    const playerX = spaceX + spaceWidth / 2 + offsetX;
+    const playerY = spaceY + spaceHeight / 2 + offsetY;
+    
+    ctx.beginPath();
+    ctx.arc(playerX, playerY, 15, 0, 2 * Math.PI);
+    ctx.fillStyle = player.color;
+    ctx.fill();
+    
+    const isCurrent = pIndex === gameState.currentPlayerIndex;
+    ctx.strokeStyle = isCurrent ? '#FFD700' : '#000';
+    ctx.lineWidth = isCurrent ? 4 : 2;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(player.name.charAt(0), playerX, playerY);
 }
 
 function updatePlayerCards() {
@@ -530,19 +525,12 @@ function updatePlayerCards() {
         const card = document.createElement('div');
         card.className = 'player-card' + (isActive ? ' active' : '');
         
-        const totalPoints = player.academicPoints + player.socialPoints + player.careerPoints;
-        
         card.innerHTML = `
             <h3>
                 <span class="player-token" style="background: ${player.color}"></span>
                 ${player.name}
             </h3>
-            <div class="stat"><span>💰 Credits</span><span>${player.credits}</span></div>
-            <div class="stat"><span>⚡ Energy</span><span>${player.energy}/5</span></div>
-            <div class="stat"><span>🎓 Academic</span><span>${player.academicPoints}</span></div>
-            <div class="stat"><span>👥 Social</span><span>${player.socialPoints}</span></div>
-            <div class="stat"><span>💼 Career</span><span>${player.careerPoints}</span></div>
-            <div class="stat"><strong><span>Total Points</span><span>${totalPoints}</span></strong></div>
+            <div class="stat"><span>Points</span><span>${player.totalPoints || 0}</span></div>
         `;
         
         container.appendChild(card);
@@ -554,9 +542,17 @@ function updatePlayerCards() {
 async function rollDice() {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    // Check if it's this player's turn
     if (currentPlayer.id !== multiplayerState.playerId) {
         alert("It's not your turn!");
+        return;
+    }
+    
+    // Check if player must skip turn
+    if (gameState.skipNextTurn[currentPlayer.id]) {
+        delete gameState.skipNextTurn[currentPlayer.id];
+        addLogEntry(`${currentPlayer.name} skipped turn (caught by professor!)`, 'event');
+        await updateGameStateInFirebase();
+        nextTurn();
         return;
     }
     
@@ -565,57 +561,63 @@ async function rollDice() {
     
     const diceRoll = Math.floor(Math.random() * 6) + 1;
     
-    // Animate dice
-    rollBtn.classList.add('dice-animation');
-    rollBtn.textContent = `🎲 ${diceRoll}`;
-    
-    setTimeout(async () => {
-        rollBtn.classList.remove('dice-animation');
-        
-        // Move player
-        const oldPosition = currentPlayer.position;
-        currentPlayer.position = (currentPlayer.position + diceRoll) % GAME_DATA.spaces.length;
-        
-        const newSpace = GAME_DATA.spaces[currentPlayer.position];
-        addLogEntry(`${currentPlayer.name} rolled ${diceRoll} and moved to ${newSpace.name}`, 'roll');
-        
-        // Check for passing start
-        if (currentPlayer.position < oldPosition) {
-            currentPlayer.credits += 1000;
-            addLogEntry(`${currentPlayer.name} passed Start! +1000 credits`, 'event');
+    // Dice animation
+    let frame = 0;
+    const diceAnimation = setInterval(() => {
+        rollBtn.textContent = `🎲 ${Math.floor(Math.random() * 6) + 1}`;
+        frame++;
+        if (frame > 10) {
+            clearInterval(diceAnimation);
+            rollBtn.textContent = `🎲 ${diceRoll}`;
+            animatePlayerMovement(diceRoll);
         }
-        
-        // Update Firebase
-        await updateGameStateInFirebase();
-        
-        setTimeout(() => {
-            checkForEvents(currentPlayer);
-        }, 800);
+    }, 100);
+}
+
+async function animatePlayerMovement(spaces) {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    const startPos = currentPlayer.position;
+    const endPos = (startPos + spaces) % GAME_DATA.spaces.length;
+    
+    for (let i = 1; i <= spaces; i++) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        currentPlayer.position = (startPos + i) % GAME_DATA.spaces.length;
+        drawBoard();
+    }
+    
+    const newSpace = GAME_DATA.spaces[currentPlayer.position];
+    addLogEntry(`${currentPlayer.name} rolled ${spaces} → ${newSpace.name}`, 'roll');
+    
+    if (endPos < startPos) {
+        currentPlayer.totalPoints += 100;
+        addLogEntry(`${currentPlayer.name} passed Start! +100 points`, 'event');
+    }
+    
+    await updateGameStateInFirebase();
+    
+    setTimeout(() => {
+        checkForEvents(currentPlayer);
     }, 500);
 }
 
 function checkForEvents(player) {
-    // Only the current player processes events
     if (player.id !== multiplayerState.playerId) return;
     
-    // Check for random events (based on position)
     const randomEvent = GAME_DATA.randomEvents.find(event => 
         event.triggerSpaces.includes(player.position)
     );
     
-    if (randomEvent && Math.random() < 0.6) { // 60% chance to trigger
+    if (randomEvent && Math.random() < 0.6) {
         showEventModal(randomEvent, player);
         return;
     }
     
-    // Check for questions (20% chance)
     if (Math.random() < 0.2) {
         const question = getRandomQuestion();
         showQuestionModal(question, player);
         return;
     }
     
-    // No event, end turn
     nextTurn();
 }
 
@@ -628,68 +630,118 @@ function showEventModal(event, player) {
     document.getElementById('eventTitle').textContent = `⚡ ${event.name}`;
     document.getElementById('eventDescription').textContent = event.description;
     
-    const optionA = document.getElementById('optionA');
-    const optionB = document.getElementById('optionB');
+    const optionsContainer = document.getElementById('eventOptions');
+    optionsContainer.innerHTML = '';
     
-    optionA.textContent = `A) ${event.optionA.text} (${event.optionA.successRate}% success)`;
-    optionB.textContent = `B) ${event.optionB.text}`;
-    
-    optionA.onclick = () => handleEventChoice(event, player, 'A');
-    optionB.onclick = () => handleEventChoice(event, player, 'B');
+    if (event.requiresHost) {
+        // Host decision events
+        if (multiplayerState.isHost) {
+            optionsContainer.innerHTML = `
+                <p style="margin: 15px 0; font-weight: bold;">Host: Did ${player.name} succeed?</p>
+                <button class="btn-choice" onclick="handleHostDecision('${event.id}', true)">✅ Yes - Success!</button>
+                <button class="btn-choice" onclick="handleHostDecision('${event.id}', false)">❌ No - Failed</button>
+            `;
+        } else {
+            optionsContainer.innerHTML = `<p>Waiting for host decision...</p>`;
+        }
+    } else if (event.targetPlayer) {
+        // Player selection events
+        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
+        optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player:</p>';
+        otherPlayers.forEach(p => {
+            const btn = document.createElement('button');
+            btn.className = 'btn-choice';
+            btn.textContent = `${p.name}`;
+            btn.onclick = () => handleTargetPlayerChoice(event, player, p);
+            optionsContainer.appendChild(btn);
+        });
+    } else {
+        // Regular choice events
+        const optionA = document.createElement('button');
+        optionA.className = 'btn-choice';
+        optionA.textContent = `A) ${event.optionA.text} ${event.optionA.successRate ? `(${event.optionA.successRate}% success)` : ''}`;
+        optionA.onclick = () => handleEventChoice(event, player, 'A');
+        
+        const optionB = document.createElement('button');
+        optionB.className = 'btn-choice';
+        optionB.textContent = `B) ${event.optionB.text}`;
+        optionB.onclick = () => handleEventChoice(event, player, 'B');
+        
+        optionsContainer.appendChild(optionA);
+        optionsContainer.appendChild(optionB);
+    }
     
     document.getElementById('eventModal').classList.remove('hidden');
+}
+
+window.handleHostDecision = async function(eventId, success) {
+    const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    
+    document.getElementById('eventModal').classList.add('hidden');
+    
+    let message, result;
+    if (success) {
+        result = event.optionA.successResult;
+        message = `✅ ${result.message}`;
+    } else {
+        result = event.optionA.failResult || { message: 'Failed' };
+        message = `❌ ${result.message}`;
+    }
+    
+    applyEventResult(currentPlayer, result);
+    addLogEntry(`${currentPlayer.name}: ${event.name} - ${message}`, 'event');
+    await updateGameStateInFirebase();
+    showResultModal('Challenge Result', message);
+}
+
+async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
+    document.getElementById('eventModal').classList.add('hidden');
+    
+    const stealAmount = 200;
+    currentPlayer.totalPoints += stealAmount;
+    targetPlayer.totalPoints = Math.max(0, targetPlayer.totalPoints - stealAmount);
+    
+    const message = `${currentPlayer.name} stole ${stealAmount} points from ${targetPlayer.name}!`;
+    addLogEntry(message, 'event');
+    await updateGameStateInFirebase();
+    showResultModal('Steal Success!', message);
 }
 
 async function handleEventChoice(event, player, choice) {
     document.getElementById('eventModal').classList.add('hidden');
     
-    let result;
-    let message;
+    let result, message;
     
     if (choice === 'A') {
         const roll = Math.random() * 100;
-        const success = roll < event.optionA.successRate;
+        const success = roll < (event.optionA.successRate || 100);
         
         if (success) {
             result = event.optionA.successResult;
             message = `✅ ${result.message}`;
-            applyEventResult(player, result);
         } else {
             result = event.optionA.failResult;
             message = `❌ ${result.message}`;
-            applyEventResult(player, result);
         }
     } else {
         result = event.optionB.result;
         message = `✅ ${result.message}`;
-        applyEventResult(player, result);
     }
     
+    applyEventResult(player, result);
     addLogEntry(`${player.name}: ${event.name} - ${message}`, 'event');
     await updateGameStateInFirebase();
     showResultModal('Event Result', message);
 }
 
 function applyEventResult(player, result) {
-    if (result.credits !== undefined) {
-        player.credits += result.credits;
-        player.credits = Math.max(0, player.credits);
+    if (result.points !== undefined) {
+        player.totalPoints += result.points;
+        player.totalPoints = Math.max(0, player.totalPoints);
     }
-    if (result.academicPoints !== undefined) {
-        player.academicPoints += result.academicPoints;
-        player.academicPoints = Math.max(0, player.academicPoints);
-    }
-    if (result.socialPoints !== undefined) {
-        player.socialPoints += result.socialPoints;
-        player.socialPoints = Math.max(0, player.socialPoints);
-    }
-    if (result.careerPoints !== undefined) {
-        player.careerPoints += result.careerPoints;
-        player.careerPoints = Math.max(0, player.careerPoints);
-    }
-    if (result.energy !== undefined) {
-        player.energy += result.energy;
-        player.energy = Math.max(0, Math.min(5, player.energy));
+    if (result.skipTurn) {
+        gameState.skipNextTurn[player.id] = true;
     }
 }
 
@@ -712,7 +764,7 @@ async function handleAnswer(question, player, answer) {
     let message = question.explanation;
     
     if (correct) {
-        player.academicPoints += question.points;
+        player.totalPoints += question.points;
         message = `✅ Correct! +${question.points} points\n${question.explanation}`;
         addLogEntry(`${player.name} answered correctly! +${question.points}`, 'question');
     } else {
@@ -739,14 +791,10 @@ async function nextTurn() {
     gameState.turnCount++;
     gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
     
-    // Check if round should advance (every 9 turns per player)
     if (gameState.turnCount > 0 && gameState.turnCount % (gameState.players.length * 9) === 0) {
         if (gameState.currentRound < gameState.maxRounds) {
             gameState.currentRound++;
             addLogEntry(`🎓 Advancing to Year ${gameState.currentRound}!`, 'roll');
-            
-            // Restore energy for all players
-            gameState.players.forEach(p => p.energy = Math.min(5, p.energy + 1));
         } else {
             await endGame();
             return;
@@ -763,7 +811,6 @@ function addLogEntry(message, type = 'info') {
         time: Date.now()
     });
     
-    // Keep only last 20 logs
     if (gameState.gameLog.length > 20) {
         gameState.gameLog = gameState.gameLog.slice(0, 20);
     }
@@ -780,6 +827,7 @@ async function updateGameStateInFirebase() {
             currentRound: gameState.currentRound,
             turnCount: gameState.turnCount,
             startTime: gameState.startTime,
+            skipNextTurn: gameState.skipNextTurn,
             gameLog: gameState.gameLog
         });
     } catch (error) {
@@ -799,7 +847,7 @@ function startTimer() {
         document.getElementById('timerDisplay').textContent = 
             `Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         
-        
+        // No auto-end - just counting
     }, 1000);
 }
 
@@ -808,13 +856,7 @@ async function endGame() {
     
     const finalScores = gameState.players.map(player => ({
         name: player.name,
-        total: player.academicPoints + player.socialPoints + player.careerPoints,
-        details: {
-            academic: player.academicPoints,
-            social: player.socialPoints,
-            career: player.careerPoints,
-            credits: player.credits
-        }
+        total: player.totalPoints || 0
     })).sort((a, b) => b.total - a.total);
     
     const scoresContainer = document.getElementById('finalScores');
@@ -823,14 +865,10 @@ async function endGame() {
             <span>${index === 0 ? '🏆 ' : ''}${score.name}</span>
             <span><strong>${score.total} points</strong></span>
         </div>
-        <div style="font-size: 0.9em; color: #666; padding-left: 20px; margin-bottom: 10px;">
-            🎓 ${score.details.academic} | 👥 ${score.details.social} | 💼 ${score.details.career} | 💰 ${score.details.credits}
-        </div>
     `).join('');
     
     document.getElementById('gameOverModal').classList.remove('hidden');
     
-    // Update game status in Firebase
     if (multiplayerState.gameId) {
         await multiplayerState.database.ref(`games/${multiplayerState.gameId}`).update({
             status: 'finished'
@@ -884,26 +922,21 @@ async function resetGame() {
     
     clearInterval(gameState.timerInterval);
     
-    // Clean up Firebase listeners
     cleanupListeners();
     
-    // Leave current game room
     if (multiplayerState.gameId) {
         await leaveRoom();
     }
     
-    // Reset state
     gameState.players = [];
     gameState.currentPlayerIndex = 0;
     gameState.currentRound = 1;
     gameState.turnCount = 0;
     gameState.startTime = null;
     gameState.gameLog = [];
+    gameState.skipNextTurn = {};
     
     showMainLobby();
 }
 
-// Initialize on load
-
 window.onload = initGame;
-
