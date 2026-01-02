@@ -17,7 +17,7 @@ const gameState = {
     maxRounds: 4,
     timerInterval: null,
     gameLog: [],
-    skipNextTurn: {} // Track players who skip turns
+    skipNextTurn: {}
 };
 
 // Player colors
@@ -40,7 +40,6 @@ function initGame() {
 }
 
 function setupEventListeners() {
-    // Lobby buttons
     document.getElementById('createGameBtn').onclick = showCreateForm;
     document.getElementById('joinGameBtn').onclick = showJoinForm;
     document.getElementById('backFromCreate').onclick = showMainLobby;
@@ -50,7 +49,6 @@ function setupEventListeners() {
     document.getElementById('startGameFromLobby').onclick = startMultiplayerGame;
     document.getElementById('leaveRoom').onclick = leaveRoom;
     
-    // Game buttons
     document.getElementById('rollBtn').addEventListener('click', rollDice);
     document.getElementById('resultOkBtn').addEventListener('click', closeResultModal);
     document.getElementById('saveBtn').addEventListener('click', saveGame);
@@ -363,6 +361,8 @@ function syncGameState(remoteState) {
 
 function drawBoard() {
     const canvas = document.getElementById('boardCanvas');
+    if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
     
     ctx.clearRect(0, 0, 700, 700);
@@ -398,7 +398,6 @@ function drawBoard() {
     GAME_DATA.spaces.forEach((space, index) => {
         let x, y, width, height;
         
-        // Bottom row (spaces 0-9)
         if (index <= 9) {
             x = startX + (index * sideSpaceWidth);
             if (index === 0) { x = startX; width = cornerSize; } 
@@ -406,25 +405,19 @@ function drawBoard() {
             else { width = sideSpaceWidth; }
             y = startY + boardSize - sideSpaceHeight;
             height = sideSpaceHeight;
-        }
-        // Right column (spaces 10-18)
-        else if (index <= 18) {
+        } else if (index <= 18) {
             const offset = index - 10;
             x = startX + boardSize - cornerSize;
             y = startY + boardSize - sideSpaceHeight - ((offset + 1) * sideSpaceWidth);
             width = cornerSize;
             height = sideSpaceWidth;
-        }
-        // Top row (spaces 19-27)
-        else if (index <= 27) {
+        } else if (index <= 27) {
             const offset = index - 19;
             x = startX + boardSize - cornerSize - ((offset + 1) * sideSpaceWidth);
             y = startY;
             width = sideSpaceWidth;
             height = sideSpaceHeight;
-        }
-        // Left column (spaces 28-35)
-        else {
+        } else {
             const offset = index - 28;
             x = startX;
             y = startY + sideSpaceHeight + (offset * sideSpaceWidth);
@@ -432,21 +425,18 @@ function drawBoard() {
             height = sideSpaceWidth;
         }
         
-        // Draw space
         ctx.fillStyle = SPACE_COLORS[space.type] || '#CCC';
         ctx.fillRect(x, y, width, height);
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 2;
         ctx.strokeRect(x, y, width, height);
         
-        // Draw number
         ctx.fillStyle = '#000';
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillText(index, x + width / 2, y + 5);
         
-        // Draw name
         ctx.font = '10px Arial';
         const words = space.name.split(' ');
         words.forEach((word, i) => {
@@ -547,7 +537,6 @@ async function rollDice() {
         return;
     }
     
-    // Check if player must skip turn
     if (gameState.skipNextTurn[currentPlayer.id]) {
         delete gameState.skipNextTurn[currentPlayer.id];
         addLogEntry(`${currentPlayer.name} skipped turn (caught by professor!)`, 'event');
@@ -561,7 +550,6 @@ async function rollDice() {
     
     const diceRoll = Math.floor(Math.random() * 6) + 1;
     
-    // Dice animation
     let frame = 0;
     const diceAnimation = setInterval(() => {
         rollBtn.textContent = `🎲 ${Math.floor(Math.random() * 6) + 1}`;
@@ -582,7 +570,7 @@ async function animatePlayerMovement(spaces) {
     for (let i = 1; i <= spaces; i++) {
         await new Promise(resolve => setTimeout(resolve, 300));
         currentPlayer.position = (startPos + i) % GAME_DATA.spaces.length;
-        drawBoard();
+        updatePlayerCards(); // Update UI during animation
     }
     
     const newSpace = GAME_DATA.spaces[currentPlayer.position];
@@ -603,11 +591,14 @@ async function animatePlayerMovement(spaces) {
 function checkForEvents(player) {
     if (player.id !== multiplayerState.playerId) return;
     
-    const randomEvent = GAME_DATA.randomEvents.find(event => 
+    // Find all events that trigger at this position
+    const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
         event.triggerSpaces.includes(player.position)
     );
     
-    if (randomEvent && Math.random() < 0.6) {
+    if (triggeredEvents.length > 0) {
+        // Pick random event if multiple
+        const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
         showEventModal(randomEvent, player);
         return;
     }
@@ -634,18 +625,16 @@ function showEventModal(event, player) {
     optionsContainer.innerHTML = '';
     
     if (event.requiresHost) {
-        // Host decision events
         if (multiplayerState.isHost) {
             optionsContainer.innerHTML = `
                 <p style="margin: 15px 0; font-weight: bold;">Host: Did ${player.name} succeed?</p>
-                <button class="btn-choice" onclick="handleHostDecision('${event.id}', true)">✅ Yes - Success!</button>
-                <button class="btn-choice" onclick="handleHostDecision('${event.id}', false)">❌ No - Failed</button>
+                <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)">✅ Yes - Success!</button>
+                <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)">❌ No - Failed</button>
             `;
         } else {
             optionsContainer.innerHTML = `<p>Waiting for host decision...</p>`;
         }
     } else if (event.targetPlayer) {
-        // Player selection events
         const otherPlayers = gameState.players.filter(p => p.id !== player.id);
         optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player:</p>';
         otherPlayers.forEach(p => {
@@ -656,10 +645,9 @@ function showEventModal(event, player) {
             optionsContainer.appendChild(btn);
         });
     } else {
-        // Regular choice events
         const optionA = document.createElement('button');
         optionA.className = 'btn-choice';
-        optionA.textContent = `A) ${event.optionA.text} ${event.optionA.successRate ? `(${event.optionA.successRate}% success)` : ''}`;
+        optionA.textContent = `A) ${event.optionA.text}${event.optionA.successRate ? ` (${event.optionA.successRate}% success)` : ''}`;
         optionA.onclick = () => handleEventChoice(event, player, 'A');
         
         const optionB = document.createElement('button');
@@ -846,8 +834,6 @@ function startTimer() {
         const seconds = Math.floor((elapsed % 60000) / 1000);
         document.getElementById('timerDisplay').textContent = 
             `Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        
-        // No auto-end - just counting
     }, 1000);
 }
 
