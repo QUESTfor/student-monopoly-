@@ -670,27 +670,30 @@ async function animatePlayerMovement(spaces) {
 }
 
 function checkForEvents(player) {
-    if (player.id !== multiplayerState.playerId) return;
+    // Only current player triggers events, but everyone sees the modal
+    if (player.id !== multiplayerState.playerId && !multiplayerState.isHost) return;
     
-    // Find all events that trigger at this position
     const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
         event.triggerSpaces.includes(player.position)
     );
     
     if (triggeredEvents.length > 0) {
-        // Pick random event if multiple
         const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
         showEventModal(randomEvent, player);
         return;
     }
     
-    if (Math.random() < 0.2) {
+    // Only player (not host) should see questions
+    if (player.id === multiplayerState.playerId && Math.random() < 0.2) {
         const question = getRandomQuestion();
         showQuestionModal(question, player);
         return;
     }
     
-    nextTurn();
+    // Only current player can end their turn
+    if (player.id === multiplayerState.playerId) {
+        nextTurn();
+    }
 }
 
 function getRandomQuestion() {
@@ -714,8 +717,8 @@ function showEventModal(event, player) {
     if (event.requiresHost) {
         const currentPlayer = gameState.players[gameState.currentPlayerIndex];
         
-        // Show to PLAYER: choose action
-        if (currentPlayer.id === multiplayerState.playerId) {
+        // PLAYER VIEW: Choose to accept or skip challenge
+        if (currentPlayer.id === multiplayerState.playerId && !multiplayerState.isHost) {
             optionsContainer.innerHTML = `
                 <p style="margin: 15px 0; font-weight: bold; color: #667eea;">Choose your action:</p>
                 <button class="btn-choice" id="hostChoiceA">${event.optionA.text}</button>
@@ -723,7 +726,7 @@ function showEventModal(event, player) {
             `;
             
             document.getElementById('hostChoiceA').onclick = async () => {
-                // Player chose to do the challenge - wait for host
+                // Player accepts challenge - notify everyone
                 await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).set({
                     playerId: currentPlayer.id,
                     playerName: currentPlayer.name,
@@ -732,7 +735,10 @@ function showEventModal(event, player) {
                     timestamp: Date.now()
                 });
                 
-                optionsContainer.innerHTML = '<p style="color: #667eea;">⏳ Waiting for host to judge your performance...</p>';
+                optionsContainer.innerHTML = `
+                    <p style="color: #667eea; font-weight: bold;">⏳ Performing challenge...</p>
+                    <p style="color: #666; margin-top: 10px;">Waiting for host to judge your performance</p>
+                `;
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
@@ -745,31 +751,56 @@ function showEventModal(event, player) {
                 showResultModal('Result', message);
             };
         }
-        // Show to OTHER PLAYERS: waiting
-        else if (!multiplayerState.isHost) {
+        // HOST VIEW: Show decision buttons immediately when challenge is pending
+        else if (multiplayerState.isHost) {
+            // First show waiting message
             optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
+            
+            // Listen for player's challenge acceptance
+            const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
+            
+            // Remove old listener if exists
+            challengeRef.off('value');
+            
+            // Add new listener
+            challengeRef.on('value', (snapshot) => {
+                const challenge = snapshot.val();
+                if (challenge && challenge.eventId === event.id) {
+                    // Player accepted the challenge - show host decision buttons
+                    optionsContainer.innerHTML = `
+                        <div style="background: #f0e6ff; padding: 20px; border-radius: 10px; margin: 10px 0;">
+                            <p style="margin: 0 0 10px 0; font-weight: bold; color: #9370DB; font-size: 1.2em;">
+                                👑 HOST DECISION
+                            </p>
+                            <p style="margin: 10px 0; color: #333;">
+                                Did <span style="color: #667eea; font-weight: bold;">${challenge.playerName}</span> complete the challenge successfully?
+                            </p>
+                            <p style="margin: 10px 0; font-size: 0.9em; color: #666; font-style: italic;">
+                                Challenge: "${challenge.eventName}"
+                            </p>
+                        </div>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)" style="background: #28a745; margin: 5px 0;">
+                            ✅ YES - Challenge Successful!
+                        </button>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)" style="background: #dc3545; margin: 5px 0;">
+                            ❌ NO - Challenge Failed
+                        </button>
+                    `;
+                }
+            });
         }
-        
-        // Show to HOST: decision buttons
-        if (multiplayerState.isHost) {
-            // Listen for player's challenge choice
+        // OTHER PLAYERS VIEW: Just watching
+        else {
+            optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
+            
+            // Listen for updates to show when challenge is happening
             const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
             challengeRef.on('value', (snapshot) => {
                 const challenge = snapshot.val();
                 if (challenge && challenge.eventId === event.id) {
                     optionsContainer.innerHTML = `
-                        <p style="margin: 15px 0; font-weight: bold; color: #9370DB;">
-                            👑 HOST DECISION: Did <span style="color: #667eea;">${challenge.playerName}</span> complete the challenge successfully?
-                        </p>
-                        <p style="margin: 10px 0; font-size: 0.9em; color: #666;">
-                            Challenge: ${challenge.eventName}
-                        </p>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)" style="background: #28a745;">
-                            ✅ YES - Success!
-                        </button>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)" style="background: #dc3545;">
-                            ❌ NO - Failed
-                        </button>
+                        <p style="color: #667eea;">🎭 ${challenge.playerName} is performing the challenge...</p>
+                        <p style="color: #666; margin-top: 10px;">Waiting for host decision</p>
                     `;
                 }
             });
@@ -1103,5 +1134,6 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
 
