@@ -246,20 +246,30 @@ async function startMultiplayerGame() {
         const snapshot = await gameRef.once('value');
         const gameData = snapshot.val();
         
-        if (Object.keys(gameData.players).length < 2) {
-            alert('Need at least 2 players to start!');
+        const allPlayers = Object.keys(gameData.players);
+        
+        if (allPlayers.length < 2) {
+            alert('Need at least 2 players to start (host + 1 player minimum)!');
             return;
         }
         
-        const players = Object.entries(gameData.players).map(([id, data], index) => ({
-            id: id,
-            name: data.name,
-            position: 0,
-            totalPoints: 0,
-            color: data.color,
-            graduated: false,
-            graduationRank: null
-        }));
+        // Create players array - EXCLUDE HOST
+        const players = Object.entries(gameData.players)
+            .filter(([id, data]) => !data.isHost) // Filter out host
+            .map(([id, data], index) => ({
+                id: id,
+                name: data.name,
+                position: 0,
+                totalPoints: 0,
+                color: data.color,
+                graduated: false,
+                graduationRank: null
+            }));
+        
+        if (players.length < 1) {
+            alert('Need at least 1 player (besides host) to start!');
+            return;
+        }
         
         const initialGameState = {
             players: players,
@@ -268,10 +278,10 @@ async function startMultiplayerGame() {
             turnCount: 0,
             startTime: Date.now(),
             skipNextTurn: {},
-            maxRounds: 3, // Changed to 3 years
+            maxRounds: 3,
             graduatedCount: 0,
             gameLog: [{
-                message: '🎮 Game Started! 3 years to graduation!',
+                message: `🎮 Game Started! ${players.length} players competing. Host: ${gameData.players[multiplayerState.playerId].name} is judging!`,
                 type: 'roll',
                 time: Date.now()
             }]
@@ -282,7 +292,7 @@ async function startMultiplayerGame() {
             gameState: initialGameState
         });
         
-        console.log('Game started!');
+        console.log('Game started! Host is judge only.');
     } catch (error) {
         console.error('Error starting game:', error);
         alert('Failed to start game. Please try again.');
@@ -354,8 +364,17 @@ function syncGameState(remoteState) {
     ).join('');
     
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.id === multiplayerState.playerId;
     const rollBtn = document.getElementById('rollBtn');
+    
+    // Check if current user is host (host doesn't play)
+    if (multiplayerState.isHost) {
+        rollBtn.disabled = true;
+        rollBtn.textContent = `👑 You are the Judge - Waiting for ${currentPlayer?.name}...`;
+        rollBtn.style.background = '#9370DB';
+        return;
+    }
+    
+    const isMyTurn = currentPlayer && currentPlayer.id === multiplayerState.playerId;
     
     // Skip graduated players
     if (currentPlayer && currentPlayer.graduated) {
@@ -366,8 +385,10 @@ function syncGameState(remoteState) {
         
         if (isMyTurn) {
             rollBtn.textContent = '🎲 Roll Dice (Your Turn!)';
+            rollBtn.style.background = '#667eea';
         } else {
             rollBtn.textContent = `⏳ Waiting for ${currentPlayer?.name}...`;
+            rollBtn.style.background = '#6c757d';
         }
     }
 }
@@ -523,17 +544,38 @@ function updatePlayerCards() {
     const container = document.getElementById('playerStats');
     container.innerHTML = '';
     
+    // Show host card if user is host
+    if (multiplayerState.isHost) {
+        const hostCard = document.createElement('div');
+        hostCard.className = 'player-card';
+        hostCard.style.background = 'linear-gradient(135deg, #9370DB 0%, #8A2BE2 100%)';
+        hostCard.innerHTML = `
+            <h3>
+                <span class="player-token" style="background: #FFD700">👑</span>
+                You (Host/Judge)
+            </h3>
+            <div class="stat"><span style="font-size: 0.9em;">You manage the game and judge challenges</span></div>
+        `;
+        container.appendChild(hostCard);
+    }
+    
     gameState.players.forEach((player, index) => {
         const isActive = index === gameState.currentPlayerIndex;
         const card = document.createElement('div');
         card.className = 'player-card' + (isActive ? ' active' : '');
         
+        if (player.graduated) {
+            card.style.opacity = '0.6';
+        }
+        
         card.innerHTML = `
             <h3>
                 <span class="player-token" style="background: ${player.color}"></span>
                 ${player.name}
+                ${player.graduated ? ' 🎓' : ''}
             </h3>
             <div class="stat"><span>Points</span><span>${player.totalPoints || 0}</span></div>
+            ${player.graduated ? `<div class="stat"><span>Graduated</span><span>${player.graduationRank === 1 ? '1st 🏆' : player.graduationRank === 2 ? '2nd 🥈' : player.graduationRank + 'th'}</span></div>` : ''}
         `;
         
         container.appendChild(card);
@@ -663,7 +705,6 @@ function showEventModal(event, player) {
     const optionsContainer = document.getElementById('eventOptions');
     optionsContainer.innerHTML = '';
     
-    // Special handling for graduation
     if (event.type === 'graduation') {
         document.getElementById('eventModal').classList.add('hidden');
         nextTurn();
@@ -671,10 +712,9 @@ function showEventModal(event, player) {
     }
     
     if (event.requiresHost) {
-        // Create buttons for the CURRENT PLAYER
         const currentPlayer = gameState.players[gameState.currentPlayerIndex];
         
-        // Show choice to current player
+        // Show to PLAYER: choose action
         if (currentPlayer.id === multiplayerState.playerId) {
             optionsContainer.innerHTML = `
                 <p style="margin: 15px 0; font-weight: bold; color: #667eea;">Choose your action:</p>
@@ -682,13 +722,17 @@ function showEventModal(event, player) {
                 <button class="btn-choice" id="hostChoiceB">${event.optionB.text}</button>
             `;
             
-            document.getElementById('hostChoiceA').onclick = () => {
-                // Hide modal and wait for host decision
-                const optA = document.getElementById('hostChoiceA');
-                const optB = document.getElementById('hostChoiceB');
-                optA.disabled = true;
-                optB.disabled = true;
-                optionsContainer.innerHTML = '<p style="color: #667eea;">Waiting for host decision...</p>';
+            document.getElementById('hostChoiceA').onclick = async () => {
+                // Player chose to do the challenge - wait for host
+                await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).set({
+                    playerId: currentPlayer.id,
+                    playerName: currentPlayer.name,
+                    eventId: event.id,
+                    eventName: event.name,
+                    timestamp: Date.now()
+                });
+                
+                optionsContainer.innerHTML = '<p style="color: #667eea;">⏳ Waiting for host to judge your performance...</p>';
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
@@ -700,22 +744,35 @@ function showEventModal(event, player) {
                 await updateGameStateInFirebase();
                 showResultModal('Result', message);
             };
-        } else {
-            optionsContainer.innerHTML = `<p>Waiting for ${currentPlayer.name} to choose...</p>`;
+        }
+        // Show to OTHER PLAYERS: waiting
+        else if (!multiplayerState.isHost) {
+            optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
         }
         
-        // Show host decision buttons ONLY TO HOST after player chooses option A
+        // Show to HOST: decision buttons
         if (multiplayerState.isHost) {
-            setTimeout(() => {
-                const currentOptContainer = document.getElementById('eventOptions');
-                if (currentOptContainer.innerHTML.includes('Waiting for host decision')) {
+            // Listen for player's challenge choice
+            const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
+            challengeRef.on('value', (snapshot) => {
+                const challenge = snapshot.val();
+                if (challenge && challenge.eventId === event.id) {
                     optionsContainer.innerHTML = `
-                        <p style="margin: 15px 0; font-weight: bold;">Host Decision: Did ${currentPlayer.name} succeed?</p>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)">✅ Yes - Success!</button>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)">❌ No - Failed</button>
+                        <p style="margin: 15px 0; font-weight: bold; color: #9370DB;">
+                            👑 HOST DECISION: Did <span style="color: #667eea;">${challenge.playerName}</span> complete the challenge successfully?
+                        </p>
+                        <p style="margin: 10px 0; font-size: 0.9em; color: #666;">
+                            Challenge: ${challenge.eventName}
+                        </p>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)" style="background: #28a745;">
+                            ✅ YES - Success!
+                        </button>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)" style="background: #dc3545;">
+                            ❌ NO - Failed
+                        </button>
                     `;
                 }
-            }, 100);
+            });
         }
         
     } else if (event.targetPlayer) {
@@ -767,6 +824,9 @@ window.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
+    // Clear pending challenge
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
+    
     document.getElementById('eventModal').classList.add('hidden');
     
     let message, result;
@@ -774,14 +834,14 @@ window.handleHostDecision = async function(eventId, success) {
         result = event.optionA.successResult;
         message = `✅ ${result.message}`;
     } else {
-        result = event.optionA.failResult || { message: 'Failed' };
+        result = event.optionA.failResult || { message: 'Failed', points: 0 };
         message = `❌ ${result.message}`;
     }
     
     applyEventResult(currentPlayer, result);
-    addLogEntry(`${currentPlayer.name}: ${event.name} - ${message}`, 'event');
+    addLogEntry(`${currentPlayer.name}: ${event.name} - ${message} (Host decision)`, 'event');
     await updateGameStateInFirebase();
-    showResultModal('Challenge Result', message);
+    showResultModal('Host Decision', message);
 }
 
 async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
@@ -1043,4 +1103,5 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
