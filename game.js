@@ -729,6 +729,7 @@ function showEventModal(event, player) {
     if (event.requiresHost) {
         const currentPlayer = gameState.players[gameState.currentPlayerIndex];
         
+        // PLAYER VIEW
         if (currentPlayer.id === multiplayerState.playerId && !multiplayerState.isHost) {
             optionsContainer.innerHTML = `
                 <p style="margin: 15px 0; font-weight: bold; color: #667eea;">Choose your action:</p>
@@ -747,14 +748,12 @@ function showEventModal(event, player) {
                 
                 optionsContainer.innerHTML = `
                     <p style="color: #667eea; font-weight: bold;">⏳ Performing challenge...</p>
-                    <p style="color: #666; margin-top: 10px;">Waiting for host to judge your performance</p>
+                    <p style="color: #666; margin-top: 10px;">Waiting for host to judge</p>
                 `;
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
-                // Clear current event
                 await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
-                
                 document.getElementById('eventModal').classList.add('hidden');
                 const result = event.optionB.result;
                 const message = `✅ ${result.message}`;
@@ -763,7 +762,8 @@ function showEventModal(event, player) {
                 await updateGameStateInFirebase();
                 showResultModal('Result', message);
             };
-        else if (multiplayerState.isHost) {
+        } else if (multiplayerState.isHost) {
+            // HOST VIEW
             optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
             
             const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
@@ -776,34 +776,34 @@ function showEventModal(event, player) {
                                 👑 HOST DECISION
                             </p>
                             <p style="margin: 10px 0; color: #333;">
-                                Did <span style="color: #667eea; font-weight: bold;">${challenge.playerName}</span> complete the challenge successfully?
+                                Did <span style="color: #667eea; font-weight: bold;">${challenge.playerName}</span> succeed?
                             </p>
                             <p style="margin: 10px 0; font-size: 0.9em; color: #666; font-style: italic;">
-                                Challenge: "${challenge.eventName}"
+                                "${challenge.eventName}"
                             </p>
                         </div>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)" style="background: #28a745; margin: 5px 0;">
-                            ✅ YES - Challenge Successful!
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)" style="background: #28a745;">
+                            ✅ YES - Success!
                         </button>
-                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)" style="background: #dc3545; margin: 5px 0;">
-                            ❌ NO - Challenge Failed
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)" style="background: #dc3545;">
+                            ❌ NO - Failed
                         </button>
                     `;
                 }
             });
+        } else {
+            // OTHER PLAYERS VIEW
+            optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name}...</p>`;
         }
-        else {
-            optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
-        }
-        
     } else if (event.targetPlayer) {
+        // STEAL EVENT
         const otherPlayers = gameState.players.filter(p => p.id !== player.id && !p.graduated);
         if (otherPlayers.length === 0) {
             document.getElementById('eventModal').classList.add('hidden');
             showResultModal('No Targets', 'No other players available!');
             return;
         }
-        optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player to steal from:</p>';
+        optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player:</p>';
         otherPlayers.forEach(p => {
             const btn = document.createElement('button');
             btn.className = 'btn-choice';
@@ -822,8 +822,8 @@ function showEventModal(event, player) {
             nextTurn();
         };
         optionsContainer.appendChild(skipBtn);
-        
     } else {
+        // REGULAR EVENT
         const optionA = document.createElement('button');
         optionA.className = 'btn-choice';
         optionA.textContent = `A) ${event.optionA.text}${event.optionA.successRate ? ` (${event.optionA.successRate}% success)` : ''}`;
@@ -840,7 +840,6 @@ function showEventModal(event, player) {
     
     document.getElementById('eventModal').classList.remove('hidden');
 }
-
 window.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
@@ -1127,4 +1126,5 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
