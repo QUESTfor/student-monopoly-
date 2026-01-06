@@ -750,6 +750,20 @@ function showEventModal(event, player) {
                     <p style="color: #667eea; font-weight: bold;">⏳ Performing challenge...</p>
                     <p style="color: #666; margin-top: 10px;">Waiting for host to judge</p>
                 `;
+                
+                // ADD THIS: Listen for host decision
+                const resultRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/challengeResult`);
+                resultRef.on('value', (snapshot) => {
+                    const result = snapshot.val();
+                    if (result && result.eventId === event.id) {
+                        // Host made a decision - close modal and show result
+                        document.getElementById('eventModal').classList.add('hidden');
+                        showResultModal(result.title, result.message);
+                        
+                        // Clean up listener
+                        resultRef.off('value');
+                    }
+                });
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
@@ -844,12 +858,6 @@ window.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    // Clear both pending challenge AND current event
-    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
-    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
-    
-    document.getElementById('eventModal').classList.add('hidden');
-    
     let message, result;
     if (success) {
         result = event.optionA.successResult;
@@ -858,6 +866,31 @@ window.handleHostDecision = async function(eventId, success) {
         result = event.optionA.failResult || { message: 'Failed', points: 0 };
         message = `❌ ${result.message}`;
     }
+    
+    applyEventResult(currentPlayer, result);
+    addLogEntry(`${currentPlayer.name}: ${event.name} - ${message} (Host decision)`, 'event');
+    await updateGameStateInFirebase();
+    
+    // Broadcast result to all players
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/challengeResult`).set({
+        eventId: eventId,
+        playerId: currentPlayer.id,
+        success: success,
+        title: 'Host Decision',
+        message: message,
+        timestamp: Date.now()
+    });
+    
+    // Clean up after 1 second
+    setTimeout(async () => {
+        await multiplayerState.database.ref(`games/${multiplayerState.gameId}/challengeResult`).remove();
+        await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
+        await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
+    }, 1000);
+    
+    document.getElementById('eventModal').classList.add('hidden');
+    showResultModal('Host Decision', message);
+}
     
     applyEventResult(currentPlayer, result);
     addLogEntry(`${currentPlayer.name}: ${event.name} - ${message} (Host decision)`, 'event');
@@ -956,9 +989,13 @@ function showResultModal(title, message) {
 
 function closeResultModal() {
     document.getElementById('resultModal').classList.add('hidden');
-    nextTurn();
+    
+    // Only the current player or host should advance the turn
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    if (currentPlayer.id === multiplayerState.playerId || multiplayerState.isHost) {
+        nextTurn();
+    }
 }
-
 async function nextTurn() {
     gameState.turnCount++;
     
@@ -1126,5 +1163,6 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
 
