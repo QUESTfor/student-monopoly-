@@ -670,29 +670,48 @@ async function animatePlayerMovement(spaces) {
 }
 
 function checkForEvents(player) {
-    // Only current player triggers events, but everyone sees the modal
-    if (player.id !== multiplayerState.playerId && !multiplayerState.isHost) return;
-    
-    const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
-        event.triggerSpaces.includes(player.position)
-    );
-    
-    if (triggeredEvents.length > 0) {
-        const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
-        showEventModal(randomEvent, player);
-        return;
-    }
-    
-    // Only player (not host) should see questions
-    if (player.id === multiplayerState.playerId && Math.random() < 0.2) {
-        const question = getRandomQuestion();
-        showQuestionModal(question, player);
-        return;
-    }
-    
-    // Only current player can end their turn
+    // Current player triggers events
     if (player.id === multiplayerState.playerId) {
+        const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
+            event.triggerSpaces.includes(player.position)
+        );
+        
+        if (triggeredEvents.length > 0) {
+            const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
+            
+            // Save which event was triggered to Firebase so everyone sees it
+            multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).set({
+                eventId: randomEvent.id,
+                playerId: player.id,
+                playerName: player.name,
+                position: player.position,
+                timestamp: Date.now()
+            });
+            
+            showEventModal(randomEvent, player);
+            return;
+        }
+        
+        if (Math.random() < 0.2) {
+            const question = getRandomQuestion();
+            showQuestionModal(question, player);
+            return;
+        }
+        
         nextTurn();
+    }
+    // Host and other players watch for events
+    else {
+        const eventRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`);
+        eventRef.on('value', (snapshot) => {
+            const eventData = snapshot.val();
+            if (eventData && eventData.playerId === player.id) {
+                const event = GAME_DATA.randomEvents.find(e => e.id === eventData.eventId);
+                if (event) {
+                    showEventModal(event, player);
+                }
+            }
+        });
     }
 }
 
@@ -742,6 +761,9 @@ function showEventModal(event, player) {
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
+                // Clear the current event
+                await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
+                
                 document.getElementById('eventModal').classList.add('hidden');
                 const result = event.optionB.result;
                 const message = `✅ ${result.message}`;
@@ -750,7 +772,6 @@ function showEventModal(event, player) {
                 await updateGameStateInFirebase();
                 showResultModal('Result', message);
             };
-        }
         // HOST VIEW: Show decision buttons immediately when challenge is pending
         else if (multiplayerState.isHost) {
             // First show waiting message
@@ -851,12 +872,13 @@ function showEventModal(event, player) {
     document.getElementById('eventModal').classList.remove('hidden');
 }
 
-window.handleHostDecision = async function(eventId, success) {
+wwindow.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    // Clear pending challenge
+    // Clear pending challenge AND current event
     await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
     
     document.getElementById('eventModal').classList.add('hidden');
     
@@ -890,6 +912,9 @@ async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
 
 async function handleEventChoice(event, player, choice) {
     document.getElementById('eventModal').classList.add('hidden');
+    
+    // Clear current event
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
     
     let result, message;
     
@@ -1134,6 +1159,7 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
 
 
