@@ -256,7 +256,9 @@ async function startMultiplayerGame() {
             name: data.name,
             position: 0,
             totalPoints: 0,
-            color: data.color
+            color: data.color,
+            graduated: false,
+            graduationRank: null
         }));
         
         const initialGameState = {
@@ -266,8 +268,10 @@ async function startMultiplayerGame() {
             turnCount: 0,
             startTime: Date.now(),
             skipNextTurn: {},
+            maxRounds: 3, // Changed to 3 years
+            graduatedCount: 0,
             gameLog: [{
-                message: '🎮 Game Started! Good luck!',
+                message: '🎮 Game Started! 3 years to graduation!',
                 type: 'roll',
                 time: Date.now()
             }]
@@ -331,6 +335,8 @@ function syncGameState(remoteState) {
     gameState.turnCount = remoteState.turnCount || 0;
     gameState.gameLog = remoteState.gameLog || [];
     gameState.skipNextTurn = remoteState.skipNextTurn || {};
+    gameState.maxRounds = remoteState.maxRounds || 3;
+    gameState.graduatedCount = remoteState.graduatedCount || 0;
     
     if (!gameState.startTime) {
         gameState.startTime = remoteState.startTime || Date.now();
@@ -339,7 +345,7 @@ function syncGameState(remoteState) {
     updatePlayerCards();
     drawBoard();
     
-    document.getElementById('yearDisplay').textContent = `Year: ${gameState.currentRound}/4`;
+    document.getElementById('yearDisplay').textContent = `Year: ${gameState.currentRound}/${gameState.maxRounds}`;
     document.getElementById('turnDisplay').textContent = `Turn: ${gameState.turnCount}`;
     
     const logContent = document.getElementById('logContent');
@@ -350,12 +356,19 @@ function syncGameState(remoteState) {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isMyTurn = currentPlayer && currentPlayer.id === multiplayerState.playerId;
     const rollBtn = document.getElementById('rollBtn');
-    rollBtn.disabled = !isMyTurn;
     
-    if (isMyTurn) {
-        rollBtn.textContent = '🎲 Roll Dice (Your Turn!)';
+    // Skip graduated players
+    if (currentPlayer && currentPlayer.graduated) {
+        rollBtn.disabled = true;
+        rollBtn.textContent = `${currentPlayer.name} has graduated ✅`;
     } else {
-        rollBtn.textContent = `⏳ Waiting for ${currentPlayer?.name}...`;
+        rollBtn.disabled = !isMyTurn;
+        
+        if (isMyTurn) {
+            rollBtn.textContent = '🎲 Roll Dice (Your Turn!)';
+        } else {
+            rollBtn.textContent = `⏳ Waiting for ${currentPlayer?.name}...`;
+        }
     }
 }
 
@@ -570,13 +583,39 @@ async function animatePlayerMovement(spaces) {
     for (let i = 1; i <= spaces; i++) {
         await new Promise(resolve => setTimeout(resolve, 300));
         currentPlayer.position = (startPos + i) % GAME_DATA.spaces.length;
-        updatePlayerCards(); // Update UI during animation
+        updatePlayerCards();
     }
     
     const newSpace = GAME_DATA.spaces[currentPlayer.position];
     addLogEntry(`${currentPlayer.name} rolled ${spaces} → ${newSpace.name}`, 'roll');
     
-    if (endPos < startPos) {
+    // Check for graduation (space 27)
+    if (currentPlayer.position === 27 && !currentPlayer.graduated) {
+        currentPlayer.graduated = true;
+        gameState.graduatedCount++;
+        currentPlayer.graduationRank = gameState.graduatedCount;
+        
+        // Bonus points for first and second graduates
+        if (gameState.graduatedCount === 1) {
+            currentPlayer.totalPoints += 1000;
+            addLogEntry(`🎓 ${currentPlayer.name} graduated FIRST! +1000 bonus points!`, 'event');
+        } else if (gameState.graduatedCount === 2) {
+            currentPlayer.totalPoints += 500;
+            addLogEntry(`🎓 ${currentPlayer.name} graduated SECOND! +500 bonus points!`, 'event');
+        } else {
+            addLogEntry(`🎓 ${currentPlayer.name} graduated!`, 'event');
+        }
+        
+        // Check if all players graduated
+        const allGraduated = gameState.players.every(p => p.graduated);
+        if (allGraduated) {
+            await updateGameStateInFirebase();
+            setTimeout(() => endGame(), 2000);
+            return;
+        }
+    }
+    
+    if (endPos < startPos && currentPlayer.position !== 27) {
         currentPlayer.totalPoints += 100;
         addLogEntry(`${currentPlayer.name} passed Start! +100 points`, 'event');
     }
@@ -624,26 +663,88 @@ function showEventModal(event, player) {
     const optionsContainer = document.getElementById('eventOptions');
     optionsContainer.innerHTML = '';
     
+    // Special handling for graduation
+    if (event.type === 'graduation') {
+        document.getElementById('eventModal').classList.add('hidden');
+        nextTurn();
+        return;
+    }
+    
     if (event.requiresHost) {
-        if (multiplayerState.isHost) {
+        // Create buttons for the CURRENT PLAYER
+        const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+        
+        // Show choice to current player
+        if (currentPlayer.id === multiplayerState.playerId) {
             optionsContainer.innerHTML = `
-                <p style="margin: 15px 0; font-weight: bold;">Host: Did ${player.name} succeed?</p>
-                <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)">✅ Yes - Success!</button>
-                <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)">❌ No - Failed</button>
+                <p style="margin: 15px 0; font-weight: bold; color: #667eea;">Choose your action:</p>
+                <button class="btn-choice" id="hostChoiceA">${event.optionA.text}</button>
+                <button class="btn-choice" id="hostChoiceB">${event.optionB.text}</button>
             `;
+            
+            document.getElementById('hostChoiceA').onclick = () => {
+                // Hide modal and wait for host decision
+                const optA = document.getElementById('hostChoiceA');
+                const optB = document.getElementById('hostChoiceB');
+                optA.disabled = true;
+                optB.disabled = true;
+                optionsContainer.innerHTML = '<p style="color: #667eea;">Waiting for host decision...</p>';
+            };
+            
+            document.getElementById('hostChoiceB').onclick = async () => {
+                document.getElementById('eventModal').classList.add('hidden');
+                const result = event.optionB.result;
+                const message = `✅ ${result.message}`;
+                applyEventResult(currentPlayer, result);
+                addLogEntry(`${currentPlayer.name}: ${event.name} - ${message}`, 'event');
+                await updateGameStateInFirebase();
+                showResultModal('Result', message);
+            };
         } else {
-            optionsContainer.innerHTML = `<p>Waiting for host decision...</p>`;
+            optionsContainer.innerHTML = `<p>Waiting for ${currentPlayer.name} to choose...</p>`;
         }
+        
+        // Show host decision buttons ONLY TO HOST after player chooses option A
+        if (multiplayerState.isHost) {
+            setTimeout(() => {
+                const currentOptContainer = document.getElementById('eventOptions');
+                if (currentOptContainer.innerHTML.includes('Waiting for host decision')) {
+                    optionsContainer.innerHTML = `
+                        <p style="margin: 15px 0; font-weight: bold;">Host Decision: Did ${currentPlayer.name} succeed?</p>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, true)">✅ Yes - Success!</button>
+                        <button class="btn-choice" onclick="handleHostDecision(${event.id}, false)">❌ No - Failed</button>
+                    `;
+                }
+            }, 100);
+        }
+        
     } else if (event.targetPlayer) {
-        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
-        optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player:</p>';
+        const otherPlayers = gameState.players.filter(p => p.id !== player.id && !p.graduated);
+        if (otherPlayers.length === 0) {
+            document.getElementById('eventModal').classList.add('hidden');
+            showResultModal('No Targets', 'No other players available!');
+            return;
+        }
+        optionsContainer.innerHTML = '<p style="margin: 15px 0;">Choose a player to steal from:</p>';
         otherPlayers.forEach(p => {
             const btn = document.createElement('button');
             btn.className = 'btn-choice';
-            btn.textContent = `${p.name}`;
+            btn.textContent = `${p.name} (${p.totalPoints} points)`;
             btn.onclick = () => handleTargetPlayerChoice(event, player, p);
             optionsContainer.appendChild(btn);
         });
+        
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'btn-choice';
+        skipBtn.style.background = '#6c757d';
+        skipBtn.textContent = 'Skip';
+        skipBtn.onclick = async () => {
+            document.getElementById('eventModal').classList.add('hidden');
+            await updateGameStateInFirebase();
+            nextTurn();
+        };
+        optionsContainer.appendChild(skipBtn);
+        
     } else {
         const optionA = document.createElement('button');
         optionA.className = 'btn-choice';
@@ -777,15 +878,24 @@ function closeResultModal() {
 
 async function nextTurn() {
     gameState.turnCount++;
-    gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
     
-    if (gameState.turnCount > 0 && gameState.turnCount % (gameState.players.length * 9) === 0) {
+    // Skip graduated players
+    do {
+        gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+    } while (gameState.players[gameState.currentPlayerIndex].graduated && 
+             !gameState.players.every(p => p.graduated));
+    
+    // Check if all players graduated
+    if (gameState.players.every(p => p.graduated)) {
+        await endGame();
+        return;
+    }
+    
+    // Check for year advancement (every 12 turns per player)
+    if (gameState.turnCount > 0 && gameState.turnCount % (gameState.players.length * 12) === 0) {
         if (gameState.currentRound < gameState.maxRounds) {
             gameState.currentRound++;
             addLogEntry(`🎓 Advancing to Year ${gameState.currentRound}!`, 'roll');
-        } else {
-            await endGame();
-            return;
         }
     }
     
@@ -842,13 +952,20 @@ async function endGame() {
     
     const finalScores = gameState.players.map(player => ({
         name: player.name,
-        total: player.totalPoints || 0
+        total: player.totalPoints || 0,
+        graduated: player.graduated,
+        graduationRank: player.graduationRank
     })).sort((a, b) => b.total - a.total);
     
     const scoresContainer = document.getElementById('finalScores');
-    scoresContainer.innerHTML = finalScores.map((score, index) => `
+    scoresContainer.innerHTML = '<h3 style="margin-bottom: 15px;">Final Rankings:</h3>' + 
+        finalScores.map((score, index) => `
         <div class="score-item ${index === 0 ? 'winner' : ''}">
-            <span>${index === 0 ? '🏆 ' : ''}${score.name}</span>
+            <span>
+                ${index === 0 ? '🏆 ' : index === 1 ? '🥈 ' : index === 2 ? '🥉 ' : ''}
+                ${score.name}
+                ${score.graduated ? ` 🎓 (Graduated ${score.graduationRank === 1 ? '1st' : score.graduationRank === 2 ? '2nd' : score.graduationRank + 'th'})` : ''}
+            </span>
             <span><strong>${score.total} points</strong></span>
         </div>
     `).join('');
@@ -926,3 +1043,4 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
