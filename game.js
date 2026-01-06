@@ -810,9 +810,23 @@ function showEventModal(event, player) {
             const btn = document.createElement('button');
             btn.className = 'btn-choice';
             btn.textContent = `${p.name} (${p.totalPoints} points)`;
-            btn.onclick = () => handleTargetPlayerChoice(event, player, p);
+            btn.onclick = async function() {  // CHANGED: added async
+                await handleTargetPlayerChoice(event, player, p);
+            };
             optionsContainer.appendChild(btn);
         });
+        
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'btn-choice';
+        skipBtn.style.background = '#6c757d';
+        skipBtn.textContent = 'Skip';
+        skipBtn.onclick = async function() {
+            await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
+            document.getElementById('eventModal').classList.add('hidden');
+            await updateGameStateInFirebase();
+            nextTurn();
+        };
+        optionsContainer.appendChild(skipBtn);
         
         const skipBtn = document.createElement('button');
         skipBtn.className = 'btn-choice';
@@ -830,12 +844,16 @@ function showEventModal(event, player) {
         const optionA = document.createElement('button');
         optionA.className = 'btn-choice';
         optionA.textContent = `A) ${event.optionA.text}${event.optionA.successRate ? ` (${event.optionA.successRate}% success)` : ''}`;
-        optionA.onclick = () => handleEventChoice(event, player, 'A');
+        optionA.onclick = async function() {  // CHANGED: added async
+            await handleEventChoice(event, player, 'A');
+        };
         
         const optionB = document.createElement('button');
         optionB.className = 'btn-choice';
         optionB.textContent = `B) ${event.optionB.text}`;
-        optionB.onclick = () => handleEventChoice(event, player, 'B');
+        optionB.onclick = async function() {  // CHANGED: added async
+            await handleEventChoice(event, player, 'B');
+        };
         
         optionsContainer.appendChild(optionA);
         optionsContainer.appendChild(optionB);
@@ -1152,6 +1170,7 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
 
 
