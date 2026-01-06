@@ -14,10 +14,11 @@ const gameState = {
     currentRound: 1,
     turnCount: 0,
     startTime: null,
-    maxRounds: 4,
+    maxRounds: 3,
     timerInterval: null,
     gameLog: [],
-    skipNextTurn: {}
+    skipNextTurn: {},
+    graduatedCount: 0
 };
 
 // Player colors
@@ -29,7 +30,8 @@ const SPACE_COLORS = {
     'academic': '#4169E1',
     'life': '#32CD32',
     'financial': '#FFD700',
-    'career': '#9370DB'
+    'career': '#9370DB',
+    'graduation': '#FFD700'
 };
 
 // Initialize game
@@ -227,7 +229,7 @@ function updatePlayerList(players) {
             font-weight: 600;
         `;
         playerDiv.innerHTML = `
-            <span>${player.name} ${player.isHost ? '👑' : ''}</span>
+            <span>${player.name} ${player.isHost ? '👑 (Host/Judge)' : ''}</span>
             <span>${player.ready ? '✅ Ready' : '⏳ Waiting'}</span>
         `;
         playerList.appendChild(playerDiv);
@@ -249,13 +251,13 @@ async function startMultiplayerGame() {
         const allPlayers = Object.keys(gameData.players);
         
         if (allPlayers.length < 2) {
-            alert('Need at least 2 players to start (host + 1 player minimum)!');
+            alert('Need at least 2 people total (host + 1 player minimum)!');
             return;
         }
         
         // Create players array - EXCLUDE HOST
         const players = Object.entries(gameData.players)
-            .filter(([id, data]) => !data.isHost) // Filter out host
+            .filter(([id, data]) => !data.isHost)
             .map(([id, data], index) => ({
                 id: id,
                 name: data.name,
@@ -366,7 +368,6 @@ function syncGameState(remoteState) {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const rollBtn = document.getElementById('rollBtn');
     
-    // Check if current user is host (host doesn't play)
     if (multiplayerState.isHost) {
         rollBtn.disabled = true;
         rollBtn.textContent = `👑 You are the Judge - Waiting for ${currentPlayer?.name}...`;
@@ -376,7 +377,6 @@ function syncGameState(remoteState) {
     
     const isMyTurn = currentPlayer && currentPlayer.id === multiplayerState.playerId;
     
-    // Skip graduated players
     if (currentPlayer && currentPlayer.graduated) {
         rollBtn.disabled = true;
         rollBtn.textContent = `${currentPlayer.name} has graduated ✅`;
@@ -408,14 +408,12 @@ function drawBoard() {
     const sideSpaceWidth = (boardSize - 2 * cornerSize) / 8;
     const sideSpaceHeight = 60;
     
-    // Draw board background
     ctx.fillStyle = '#e8f4f8';
     ctx.fillRect(startX, startY, boardSize, boardSize);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 3;
     ctx.strokeRect(startX, startY, boardSize, boardSize);
     
-    // Draw center
     const centerX = startX + boardSize / 2;
     const centerY = startY + boardSize / 2;
     
@@ -426,9 +424,8 @@ function drawBoard() {
     ctx.fillText(`Year ${gameState.currentRound}`, centerX, centerY - 15);
     
     ctx.font = '20px Arial';
-    ctx.fillText('大學四年', centerX, centerY + 15);
+    ctx.fillText('大學三年', centerX, centerY + 15);
     
-    // Draw all 36 spaces
     GAME_DATA.spaces.forEach((space, index) => {
         let x, y, width, height;
         
@@ -478,7 +475,6 @@ function drawBoard() {
         });
     });
     
-    // Draw players
     gameState.players.forEach((player, pIndex) => {
         drawPlayerToken(ctx, player, pIndex, startX, startY, boardSize, cornerSize, sideSpaceWidth, sideSpaceHeight);
     });
@@ -544,7 +540,6 @@ function updatePlayerCards() {
     const container = document.getElementById('playerStats');
     container.innerHTML = '';
     
-    // Show host card if user is host
     if (multiplayerState.isHost) {
         const hostCard = document.createElement('div');
         hostCard.className = 'player-card';
@@ -631,13 +626,11 @@ async function animatePlayerMovement(spaces) {
     const newSpace = GAME_DATA.spaces[currentPlayer.position];
     addLogEntry(`${currentPlayer.name} rolled ${spaces} → ${newSpace.name}`, 'roll');
     
-    // Check for graduation (space 27)
     if (currentPlayer.position === 27 && !currentPlayer.graduated) {
         currentPlayer.graduated = true;
         gameState.graduatedCount++;
         currentPlayer.graduationRank = gameState.graduatedCount;
         
-        // Bonus points for first and second graduates
         if (gameState.graduatedCount === 1) {
             currentPlayer.totalPoints += 1000;
             addLogEntry(`🎓 ${currentPlayer.name} graduated FIRST! +1000 bonus points!`, 'event');
@@ -648,7 +641,6 @@ async function animatePlayerMovement(spaces) {
             addLogEntry(`🎓 ${currentPlayer.name} graduated!`, 'event');
         }
         
-        // Check if all players graduated
         const allGraduated = gameState.players.every(p => p.graduated);
         if (allGraduated) {
             await updateGameStateInFirebase();
@@ -670,49 +662,25 @@ async function animatePlayerMovement(spaces) {
 }
 
 function checkForEvents(player) {
-    // Current player triggers events
-    if (player.id === multiplayerState.playerId) {
-        const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
-            event.triggerSpaces.includes(player.position)
-        );
-        
-        if (triggeredEvents.length > 0) {
-            const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
-            
-            // Save which event was triggered to Firebase so everyone sees it
-            multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).set({
-                eventId: randomEvent.id,
-                playerId: player.id,
-                playerName: player.name,
-                position: player.position,
-                timestamp: Date.now()
-            });
-            
-            showEventModal(randomEvent, player);
-            return;
-        }
-        
-        if (Math.random() < 0.2) {
-            const question = getRandomQuestion();
-            showQuestionModal(question, player);
-            return;
-        }
-        
-        nextTurn();
+    if (player.id !== multiplayerState.playerId) return;
+    
+    const triggeredEvents = GAME_DATA.randomEvents.filter(event => 
+        event.triggerSpaces.includes(player.position)
+    );
+    
+    if (triggeredEvents.length > 0) {
+        const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
+        showEventModal(randomEvent, player);
+        return;
     }
-    // Host and other players watch for events
-    else {
-        const eventRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`);
-        eventRef.on('value', (snapshot) => {
-            const eventData = snapshot.val();
-            if (eventData && eventData.playerId === player.id) {
-                const event = GAME_DATA.randomEvents.find(e => e.id === eventData.eventId);
-                if (event) {
-                    showEventModal(event, player);
-                }
-            }
-        });
+    
+    if (Math.random() < 0.2) {
+        const question = getRandomQuestion();
+        showQuestionModal(question, player);
+        return;
     }
+    
+    nextTurn();
 }
 
 function getRandomQuestion() {
@@ -736,7 +704,6 @@ function showEventModal(event, player) {
     if (event.requiresHost) {
         const currentPlayer = gameState.players[gameState.currentPlayerIndex];
         
-        // PLAYER VIEW: Choose to accept or skip challenge
         if (currentPlayer.id === multiplayerState.playerId && !multiplayerState.isHost) {
             optionsContainer.innerHTML = `
                 <p style="margin: 15px 0; font-weight: bold; color: #667eea;">Choose your action:</p>
@@ -745,7 +712,6 @@ function showEventModal(event, player) {
             `;
             
             document.getElementById('hostChoiceA').onclick = async () => {
-                // Player accepts challenge - notify everyone
                 await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).set({
                     playerId: currentPlayer.id,
                     playerName: currentPlayer.name,
@@ -761,9 +727,6 @@ function showEventModal(event, player) {
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
-                // Clear the current event
-                await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
-                
                 document.getElementById('eventModal').classList.add('hidden');
                 const result = event.optionB.result;
                 const message = `✅ ${result.message}`;
@@ -772,22 +735,14 @@ function showEventModal(event, player) {
                 await updateGameStateInFirebase();
                 showResultModal('Result', message);
             };
-        // HOST VIEW: Show decision buttons immediately when challenge is pending
+        }
         else if (multiplayerState.isHost) {
-            // First show waiting message
             optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
             
-            // Listen for player's challenge acceptance
             const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
-            
-            // Remove old listener if exists
-            challengeRef.off('value');
-            
-            // Add new listener
             challengeRef.on('value', (snapshot) => {
                 const challenge = snapshot.val();
                 if (challenge && challenge.eventId === event.id) {
-                    // Player accepted the challenge - show host decision buttons
                     optionsContainer.innerHTML = `
                         <div style="background: #f0e6ff; padding: 20px; border-radius: 10px; margin: 10px 0;">
                             <p style="margin: 0 0 10px 0; font-weight: bold; color: #9370DB; font-size: 1.2em;">
@@ -810,21 +765,8 @@ function showEventModal(event, player) {
                 }
             });
         }
-        // OTHER PLAYERS VIEW: Just watching
         else {
             optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
-            
-            // Listen for updates to show when challenge is happening
-            const challengeRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`);
-            challengeRef.on('value', (snapshot) => {
-                const challenge = snapshot.val();
-                if (challenge && challenge.eventId === event.id) {
-                    optionsContainer.innerHTML = `
-                        <p style="color: #667eea;">🎭 ${challenge.playerName} is performing the challenge...</p>
-                        <p style="color: #666; margin-top: 10px;">Waiting for host decision</p>
-                    `;
-                }
-            });
         }
         
     } else if (event.targetPlayer) {
@@ -872,13 +814,11 @@ function showEventModal(event, player) {
     document.getElementById('eventModal').classList.remove('hidden');
 }
 
-wwindow.handleHostDecision = async function(eventId, success) {
+window.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    // Clear pending challenge AND current event
     await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
-    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
     
     document.getElementById('eventModal').classList.add('hidden');
     
@@ -912,9 +852,6 @@ async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
 
 async function handleEventChoice(event, player, choice) {
     document.getElementById('eventModal').classList.add('hidden');
-    
-    // Clear current event
-    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
     
     let result, message;
     
@@ -995,19 +932,16 @@ function closeResultModal() {
 async function nextTurn() {
     gameState.turnCount++;
     
-    // Skip graduated players
     do {
         gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
     } while (gameState.players[gameState.currentPlayerIndex].graduated && 
              !gameState.players.every(p => p.graduated));
     
-    // Check if all players graduated
     if (gameState.players.every(p => p.graduated)) {
         await endGame();
         return;
     }
     
-    // Check for year advancement (every 12 turns per player)
     if (gameState.turnCount > 0 && gameState.turnCount % (gameState.players.length * 12) === 0) {
         if (gameState.currentRound < gameState.maxRounds) {
             gameState.currentRound++;
@@ -1042,6 +976,8 @@ async function updateGameStateInFirebase() {
             turnCount: gameState.turnCount,
             startTime: gameState.startTime,
             skipNextTurn: gameState.skipNextTurn,
+            maxRounds: gameState.maxRounds,
+            graduatedCount: gameState.graduatedCount,
             gameLog: gameState.gameLog
         });
     } catch (error) {
@@ -1154,12 +1090,9 @@ async function resetGame() {
     gameState.startTime = null;
     gameState.gameLog = [];
     gameState.skipNextTurn = {};
+    gameState.graduatedCount = 0;
     
     showMainLobby();
 }
 
 window.onload = initGame;
-
-
-
-
