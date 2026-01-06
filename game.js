@@ -737,7 +737,8 @@ function showEventModal(event, player) {
                 <button class="btn-choice" id="hostChoiceB">${event.optionB.text}</button>
             `;
             
-            document.getElementById('hostChoiceA').onclick = async () => {
+            // ADD async HERE
+            document.getElementById('hostChoiceA').onclick = async function() {
                 await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).set({
                     playerId: currentPlayer.id,
                     playerName: currentPlayer.name,
@@ -750,23 +751,10 @@ function showEventModal(event, player) {
                     <p style="color: #667eea; font-weight: bold;">⏳ Performing challenge...</p>
                     <p style="color: #666; margin-top: 10px;">Waiting for host to judge</p>
                 `;
-                
-                // ADD THIS: Listen for host decision
-                const resultRef = multiplayerState.database.ref(`games/${multiplayerState.gameId}/challengeResult`);
-                resultRef.on('value', (snapshot) => {
-                    const result = snapshot.val();
-                    if (result && result.eventId === event.id) {
-                        // Host made a decision - close modal and show result
-                        document.getElementById('eventModal').classList.add('hidden');
-                        showResultModal(result.title, result.message);
-                        
-                        // Clean up listener
-                        resultRef.off('value');
-                    }
-                });
             };
             
-            document.getElementById('hostChoiceB').onclick = async () => {
+            // ADD async HERE TOO
+            document.getElementById('hostChoiceB').onclick = async function() {
                 await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
                 document.getElementById('eventModal').classList.add('hidden');
                 const result = event.optionB.result;
@@ -830,7 +818,8 @@ function showEventModal(event, player) {
         skipBtn.className = 'btn-choice';
         skipBtn.style.background = '#6c757d';
         skipBtn.textContent = 'Skip';
-        skipBtn.onclick = async () => {
+        skipBtn.onclick = async function() {
+            await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
             document.getElementById('eventModal').classList.add('hidden');
             await updateGameStateInFirebase();
             nextTurn();
@@ -1163,6 +1152,7 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
 
 
 
