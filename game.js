@@ -208,8 +208,24 @@ function listenToGameUpdates() {
         }
     });
     multiplayerState.listeners.push({ ref: gameRef.child('status'), type: 'value' });
+    
+    // NEW: Listen for events (especially important for host)
+    const eventListener = gameRef.child('currentEvent').on('value', (snapshot) => {
+        const eventData = snapshot.val();
+        if (eventData) {
+            const event = GAME_DATA.randomEvents.find(e => e.id === eventData.eventId);
+            const player = gameState.players.find(p => p.id === eventData.playerId);
+            
+            if (event && player) {
+                // Only show if we're not the one who triggered it OR if we're the host
+                if (multiplayerState.isHost || eventData.playerId !== multiplayerState.playerId) {
+                    showEventModal(event, player);
+                }
+            }
+        }
+    });
+    multiplayerState.listeners.push({ ref: gameRef.child('currentEvent'), type: 'value' });
 }
-
 function updatePlayerList(players) {
     const playerList = document.getElementById('playerList');
     playerList.innerHTML = '<h4>Players in Room:</h4>';
@@ -670,6 +686,16 @@ function checkForEvents(player) {
     
     if (triggeredEvents.length > 0) {
         const randomEvent = triggeredEvents[Math.floor(Math.random() * triggeredEvents.length)];
+        
+        // Save event to Firebase so host can see it
+        multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).set({
+            eventId: randomEvent.id,
+            playerId: player.id,
+            playerName: player.name,
+            position: player.position,
+            timestamp: Date.now()
+        });
+        
         showEventModal(randomEvent, player);
         return;
     }
@@ -682,7 +708,6 @@ function checkForEvents(player) {
     
     nextTurn();
 }
-
 function getRandomQuestion() {
     const randomIndex = Math.floor(Math.random() * GAME_DATA.questions.length);
     return GAME_DATA.questions[randomIndex];
@@ -727,6 +752,9 @@ function showEventModal(event, player) {
             };
             
             document.getElementById('hostChoiceB').onclick = async () => {
+                // Clear current event
+                await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
+                
                 document.getElementById('eventModal').classList.add('hidden');
                 const result = event.optionB.result;
                 const message = `✅ ${result.message}`;
@@ -735,7 +763,6 @@ function showEventModal(event, player) {
                 await updateGameStateInFirebase();
                 showResultModal('Result', message);
             };
-        }
         else if (multiplayerState.isHost) {
             optionsContainer.innerHTML = `<p>⏳ Waiting for ${currentPlayer.name} to choose...</p>`;
             
@@ -818,7 +845,9 @@ window.handleHostDecision = async function(eventId, success) {
     const event = GAME_DATA.randomEvents.find(e => e.id == eventId);
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
+    // Clear both pending challenge AND current event
     await multiplayerState.database.ref(`games/${multiplayerState.gameId}/pendingChallenge`).remove();
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
     
     document.getElementById('eventModal').classList.add('hidden');
     
@@ -836,7 +865,6 @@ window.handleHostDecision = async function(eventId, success) {
     await updateGameStateInFirebase();
     showResultModal('Host Decision', message);
 }
-
 async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
     document.getElementById('eventModal').classList.add('hidden');
     
@@ -851,6 +879,9 @@ async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
 }
 
 async function handleEventChoice(event, player, choice) {
+    // Clear current event
+    await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
+    
     document.getElementById('eventModal').classList.add('hidden');
     
     let result, message;
@@ -1096,3 +1127,4 @@ async function resetGame() {
 }
 
 window.onload = initGame;
+
