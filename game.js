@@ -215,7 +215,7 @@ function listenToGameUpdates() {
         if (eventData) {
             const event = GAME_DATA.randomEvents.find(e => e.id === eventData.eventId);
             const player = gameState.players.find(p => p.id === eventData.playerId);
-            
+
             if (event && player) {
                 // Only show if we're not the one who triggered it OR if we're the host
                 if (multiplayerState.isHost || eventData.playerId !== multiplayerState.playerId) {
@@ -225,6 +225,17 @@ function listenToGameUpdates() {
         }
     });
     multiplayerState.listeners.push({ ref: gameRef.child('currentEvent'), type: 'value' });
+
+    // Listen for host decision results
+    const challengeResultListener = gameRef.child('challengeResult').on('value', (snapshot) => {
+        const result = snapshot.val();
+        if (result && result.playerId === multiplayerState.playerId && !multiplayerState.isHost) {
+            // Player receives the host's decision
+            document.getElementById('eventModal').classList.add('hidden');
+            showResultModal(result.title, result.message);
+        }
+    });
+    multiplayerState.listeners.push({ ref: gameRef.child('challengeResult'), type: 'value' });
 }
 function updatePlayerList(players) {
     const playerList = document.getElementById('playerList');
