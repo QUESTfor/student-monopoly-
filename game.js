@@ -815,19 +815,7 @@ function showEventModal(event, player) {
             };
             optionsContainer.appendChild(btn);
         });
-        
-        const skipBtn = document.createElement('button');
-        skipBtn.className = 'btn-choice';
-        skipBtn.style.background = '#6c757d';
-        skipBtn.textContent = 'Skip';
-        skipBtn.onclick = async function() {
-            await multiplayerState.database.ref(`games/${multiplayerState.gameId}/currentEvent`).remove();
-            document.getElementById('eventModal').classList.add('hidden');
-            await updateGameStateInFirebase();
-            nextTurn();
-        };
-        optionsContainer.appendChild(skipBtn);
-        
+
         const skipBtn = document.createElement('button');
         skipBtn.className = 'btn-choice';
         skipBtn.style.background = '#6c757d';
@@ -898,12 +886,7 @@ window.handleHostDecision = async function(eventId, success) {
     document.getElementById('eventModal').classList.add('hidden');
     showResultModal('Host Decision', message);
 }
-    
-    applyEventResult(currentPlayer, result);
-    addLogEntry(`${currentPlayer.name}: ${event.name} - ${message} (Host decision)`, 'event');
-    await updateGameStateInFirebase();
-    showResultModal('Host Decision', message);
-}
+
 async function handleTargetPlayerChoice(event, currentPlayer, targetPlayer) {
     document.getElementById('eventModal').classList.add('hidden');
     
